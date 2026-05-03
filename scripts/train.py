@@ -9,6 +9,8 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer
 
+from src.evaluation.metrics import print_results, save_report
+from src.evaluation.visualizer import TrainingVisualizer
 from src.model.components.focal_loss import FocalLoss
 from src.training.optimizer_factory import DifferentialLROptimizerFactory
 from src.training.scheduler_factory import WarmupCosineSchedulerFactory
@@ -53,7 +55,7 @@ def main(args: argparse.Namespace) -> None:
     logger.info(f"Device: {device}")
     logger.info("=" * 70)
 
-    logger.info("\n================================= 1. Loading and preprocessing data =================================")
+    logger.info("\n================================= 1. Loading and Preprocessing data =================================")
     preprocessor = TwitterTextPreprocessor()
     loader = OffensiveDatasetLoader(preprocessor, cfg.labels, cfg.split)
     data = loader.load(args.data_path)
@@ -90,6 +92,21 @@ def main(args: argparse.Namespace) -> None:
     )
     history = trainer.fit(epochs=args.epochs)
 
+    logger.info("\n================================= 5. Saving Model ===================================================")
+    model.save(cfg.paths.model_checkpoint, tokenizer=tokenizer)
+
+    logger.info("\n================================= 6. Evaluation and Visualisation ===================================")
+    visualizer = TrainingVisualizer(cfg.paths.plots)
+    visualizer.plot_training_curves(history, title="MPNet + TransformerEncoder")
+
+    metrics = trainer.evaluate(test_loader)
+    print_results(metrics, title="MPNet + TransformerEncoder - Test")
+
+    visualizer.plot_confusion_matrix(metrics["confusion_matrix"])
+    visualizer.plot_roc_pr(metrics["labels"], metrics["probs"], name="MPNet + TransformerEncoder")
+    visualizer.plot_probability_distribution(metrics["labels"], metrics["probs"])
+
+    save_report(metrics, cfg.paths.reports)
 
 
 if __name__ == "__main__":
