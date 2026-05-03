@@ -9,6 +9,11 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer
 
+from src.model.components.focal_loss import FocalLoss
+from src.training.optimizer_factory import DifferentialLROptimizerFactory
+from src.training.scheduler_factory import WarmupCosineSchedulerFactory
+from src.training.trainer import Trainer
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.model.mpnet_transformer import MPNetTransformerClassifier
@@ -60,6 +65,30 @@ def main(args: argparse.Namespace) -> None:
 
     logger.info("\n================================= 3. Model Initialization ===========================================")
     model = MPNetTransformerClassifier(cfg.model, freeze_sbert=args.freeze_sbert)
+
+    optimizer = DifferentialLROptimizerFactory(cfg.training).create(model)
+    total_steps = len(train_loader) * args.epochs // args.accum_steps
+
+    scheduler = WarmupCosineSchedulerFactory(cfg.training.warmup_ratio).create(optimizer, total_steps)
+    criterion = FocalLoss(
+        alpha=cfg.training.focal_alpha,
+        gamma=cfg.training.focal_gamma,
+        pos_weight=torch.tensor([5.0], device=device)
+    )
+
+    logger.info("\n================================= 4. Learning =======================================================")
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        criterion=criterion,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        device=device,
+        cfg=cfg.training,
+        accum_steps=args.accum_steps,
+    )
+    history = trainer.fit(epochs=args.epochs)
 
 
 
