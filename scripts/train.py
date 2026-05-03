@@ -11,6 +11,7 @@ from transformers import AutoTokenizer
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from src.model.mpnet_transformer import MPNetTransformerClassifier
 from src.config.settings import Settings
 from src.data.dataset_loader import OffensiveDatasetLoader
 from src.data.preprocessor import TwitterTextPreprocessor
@@ -57,6 +58,8 @@ def main(args: argparse.Namespace) -> None:
     loader_factory = DataLoaderFactory(tokenizer, cfg.model, cfg.training)
     train_loader, val_loader, test_loader = loader_factory.make_all(data)
 
+    logger.info("\n================================= 3. Model Initialization ===========================================")
+    model = MPNetTransformerClassifier(cfg.model, freeze_sbert=args.freeze_sbert)
 
 
 

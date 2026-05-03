@@ -1,2 +1,5 @@
 .idea
 .venv
+plots
+reports
+saved_models
