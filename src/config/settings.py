@@ -88,6 +88,25 @@ class TrainingSettings:
 
 
 @dataclass(frozen=True)
+class MLflowSettings:
+    tracking_uri: str = field(
+        default_factory=lambda: os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    )
+    experiment_name: str = field(
+        default_factory=lambda: os.getenv("MLFLOW_EXPERIMENT_NAME", "offensive-text-detection")
+    )
+    run_name: str = ""
+    log_model: bool = True
+    log_plots: bool = True
+    tags: dict = field(default_factory=lambda: {
+        "model": "MPNet + TransformerEncoder",
+        "framework": "PyTorch",
+        "task": "offensive-text-detection",
+        "dataset": "Hate Speech and Offensive Language Dataset"
+    })
+
+
+@dataclass(frozen=True)
 class InferenceSettings:
     classification_threshold: float = 0.5
 
@@ -99,4 +118,5 @@ class Settings:
     split: SplitSettings = field(default_factory=SplitSettings)
     model: ModelSettings = field(default_factory=ModelSettings)
     training: TrainingSettings = field(default_factory=TrainingSettings)
+    mlflow: MLflowSettings = field(default_factory=MLflowSettings)
     inference: InferenceSettings = field(default_factory=InferenceSettings)

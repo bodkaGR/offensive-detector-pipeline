@@ -9,17 +9,17 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from src.training.mlflow_tracker import MLflowTracker
 from src.evaluation.metrics import print_results, save_report
 from src.evaluation.visualizer import TrainingVisualizer
 from src.model.components.focal_loss import FocalLoss
 from src.training.optimizer_factory import DifferentialLROptimizerFactory
 from src.training.scheduler_factory import WarmupCosineSchedulerFactory
 from src.training.trainer import Trainer
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from src.model.mpnet_transformer import MPNetTransformerClassifier
-from src.config.settings import Settings
+from src.config.settings import Settings, MLflowSettings
 from src.data.dataset_loader import OffensiveDatasetLoader
 from src.data.preprocessor import TwitterTextPreprocessor
 from src.data.torch_dataset import DataLoaderFactory
@@ -50,6 +50,18 @@ def main(args: argparse.Namespace) -> None:
     set_seed(cfg.split.random_seed)
     logger = logging.getLogger(__name__)
 
+    mlflow_cfg = MLflowSettings(
+        tracking_uri=cfg.mlflow.tracking_uri,
+        experiment_name=args.experiment or cfg.mlflow.experiment_name,
+        run_name=args.run_name or "",
+        log_model=cfg.mlflow.log_model,
+        log_plots=cfg.mlflow.log_plots,
+        tags={
+            **cfg.mlflow.tags,
+            "freeze_sbert": str(args.freeze_sbert)
+        },
+    )
+
     logger.info("=" * 70)
     logger.info("MPNet + TransformerEncoder Pipeline")
     logger.info(f"Device: {device}")
@@ -59,6 +71,9 @@ def main(args: argparse.Namespace) -> None:
     preprocessor = TwitterTextPreprocessor()
     loader = OffensiveDatasetLoader(preprocessor, cfg.labels, cfg.split)
     data = loader.load(args.data_path)
+
+    y_train = data["y_train"]
+    off_pct = float(y_train.sum()) / max(len(y_train), 1)
 
     logger.info("\n================================= 2. Tokenizer and DataLoaders ======================================")
     tokenizer = AutoTokenizer.from_pretrained(cfg.model.sbert_model_name)
@@ -90,21 +105,40 @@ def main(args: argparse.Namespace) -> None:
         cfg=cfg.training,
         accum_steps=args.accum_steps,
     )
-    history = trainer.fit(epochs=args.epochs)
 
-    logger.info("\n================================= 5. Saving Model ===================================================")
-    model.save(cfg.paths.model_checkpoint, tokenizer=tokenizer)
+    with MLflowTracker(mlflow_cfg, cfg.model, cfg.training) as tracker:
+        tracker.log_params()
+        tracker.log_dataset_info(
+            len(data["X_train"]), len(data["X_val"]), len(data["X_test"]), off_pct
+        )
 
-    logger.info("\n================================= 6. Evaluation and Visualisation ===================================")
-    visualizer = TrainingVisualizer(cfg.paths.plots)
-    visualizer.plot_training_curves(history, title="MPNet + TransformerEncoder")
+        original_fit = trainer.fit
 
-    metrics = trainer.evaluate(test_loader)
-    print_results(metrics, title="MPNet + TransformerEncoder - Test")
+        def fit_with_tracking(epochs: int) -> dict:
+            history = original_fit(epochs)
+            tracker.log_history(history)
+            return history
 
-    visualizer.plot_confusion_matrix(metrics["confusion_matrix"])
-    visualizer.plot_roc_pr(metrics["labels"], metrics["probs"], name="MPNet + TransformerEncoder")
-    visualizer.plot_probability_distribution(metrics["labels"], metrics["probs"])
+        history = fit_with_tracking(args.epochs)
+
+        logger.info("\n================================= 5. Saving Model ===================================================")
+        model.save(cfg.paths.model_checkpoint, tokenizer=tokenizer)
+
+        logger.info("\n================================= 6. Evaluation and Visualisation ===================================")
+        visualizer = TrainingVisualizer(cfg.paths.plots)
+        visualizer.plot_training_curves(history, title="MPNet + TransformerEncoder")
+
+        metrics = trainer.evaluate(test_loader)
+        print_results(metrics, title="MPNet + TransformerEncoder - Test")
+
+        visualizer.plot_confusion_matrix(metrics["confusion_matrix"])
+        visualizer.plot_roc_pr(metrics["labels"], metrics["probs"], name="MPNet + TransformerEncoder")
+        visualizer.plot_probability_distribution(metrics["labels"], metrics["probs"])
+
+        tracker.log_test_metrics(metrics)
+        tracker.log_model_artifact(cfg.paths.model_checkpoint)
+        tracker.log_tokenizer_artifact(cfg.paths.tokenizer_dir)
+        tracker.log_plots(cfg.paths.plots)
 
     save_report(metrics, cfg.paths.reports)
 
@@ -115,4 +149,6 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--freeze_sbert", action="store_true")
     parser.add_argument("--accum_steps", type=int, default=1)
+    parser.add_argument("--experiment", type=str, default="")
+    parser.add_argument("--run_name", type=str, default="")
     main(parser.parse_args())

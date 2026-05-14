@@ -30,7 +30,7 @@ class OffensiveTextDataset(Dataset):
 
         encoding = self._tokenizer(
             text,
-            max_length=self._max_len,
+            max_length=self._max_length,
             padding="max_length",
             truncation=True,
             return_tensors="pt",

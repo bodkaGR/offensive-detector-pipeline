@@ -1,0 +1,60 @@
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.13.0
+    container_name: mlflow-server
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    networks:
+      - ml-net
+    volumes:
+      - mlflow-data:/mlflow
+    environment:
+      MLFLOW_BACKEND_STORE_URI: "sqlite:////mlflow/mlflow.db"
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: "/mlflow/artifacts"
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ml-pipeline
+    networks:
+      - ml-net
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data:ro
+      - ./saved_models:/app/saved_models
+      - ./plots:/app/plots
+      - ./reports:/app/reports
+    environment:
+      MLFLOW_TRACKING_URI: http://localhost:5000
+      MLFLOW_EXPERIMENT_NAME: offensive-text-detection
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
+    command: >
+      python scripts/train.py
+      --data_path data/labeled_data.csv
+      --epochs 10
+
+
+volumes:
+  mlflow-data:
+  model-artifacts:
+
+networks:
+  ml-net:
+    driver: bridge
