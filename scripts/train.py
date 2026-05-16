@@ -14,12 +14,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from src.training.mlflow_tracker import MLflowTracker
 from src.evaluation.metrics import print_results, save_report
 from src.evaluation.visualizer import TrainingVisualizer
+from src.training.hugging_face_publisher import HuggingFacePublisher
 from src.model.components.focal_loss import FocalLoss
 from src.training.optimizer_factory import DifferentialLROptimizerFactory
 from src.training.scheduler_factory import WarmupCosineSchedulerFactory
 from src.training.trainer import Trainer
 from src.model.mpnet_transformer import MPNetTransformerClassifier
-from src.config.settings import Settings, MLflowSettings
+from src.config.settings import Settings, MLflowSettings, HuggingFaceSettings
 from src.data.dataset_loader import OffensiveDatasetLoader
 from src.data.preprocessor import TwitterTextPreprocessor
 from src.data.torch_dataset import DataLoaderFactory
@@ -61,6 +62,14 @@ def main(args: argparse.Namespace) -> None:
             "freeze_sbert": str(args.freeze_sbert)
         },
     )
+
+    hub_cfg = HuggingFaceSettings(
+        token=os.getenv("HF_TOKEN", cfg.huggingface.token),
+        repository_id=args.hf_repo_id or os.getenv("HF_REPO_ID", cfg.huggingface.repository_id),
+        is_public=args.hf_public,
+        commit_message=args.hf_commit_message or cfg.huggingface.commit_message,
+    )
+    publisher = HuggingFacePublisher(hub_cfg)
 
     logger.info("=" * 70)
     logger.info("MPNet + TransformerEncoder Pipeline")
@@ -112,14 +121,8 @@ def main(args: argparse.Namespace) -> None:
             len(data["X_train"]), len(data["X_val"]), len(data["X_test"]), off_pct
         )
 
-        original_fit = trainer.fit
-
-        def fit_with_tracking(epochs: int) -> dict:
-            history = original_fit(epochs)
-            tracker.log_history(history)
-            return history
-
-        history = fit_with_tracking(args.epochs)
+        history = trainer.fit(args.epochs)
+        tracker.log_history(history)
 
         logger.info("\n================================= 5. Saving Model ===================================================")
         model.save(cfg.paths.model_checkpoint, tokenizer=tokenizer)
@@ -136,19 +139,31 @@ def main(args: argparse.Namespace) -> None:
         visualizer.plot_probability_distribution(metrics["labels"], metrics["probs"])
 
         tracker.log_test_metrics(metrics)
-        tracker.log_model_artifact(cfg.paths.model_checkpoint)
-        tracker.log_tokenizer_artifact(cfg.paths.tokenizer_dir)
-        tracker.log_plots(cfg.paths.plots)
 
-    save_report(metrics, cfg.paths.reports)
+        save_report(metrics, cfg.paths.reports)
+
+    if args.push_to_hub:
+        logger.info("\n================================= 7. Hugging Face Hub ===============================================")
+        try:
+            publisher.push(cfg.paths.model_checkpoint, cfg.paths.tokenizer_dir)
+        except Exception as exc:
+            logger.error(f"Failed to publish artifacts: {exc}")
+
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MPNet + TransformerEncoder Training")
+    # Model
     parser.add_argument("--data_path", default="data/labeled_data.csv")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--freeze_sbert", action="store_true")
     parser.add_argument("--accum_steps", type=int, default=1)
+    # MLflow
     parser.add_argument("--experiment", type=str, default="")
     parser.add_argument("--run_name", type=str, default="")
+    # HuggingFace Hub
+    parser.add_argument("--push_to_hub", action="store_true", help="Publishing model and tokenizer to HuggingFace Hub")
+    parser.add_argument("--hf_repo_id", type=str, default="")
+    parser.add_argument("--hf_public", action="store_true")
+    parser.add_argument("--hf_commit_message", type=str, default="")
     main(parser.parse_args())

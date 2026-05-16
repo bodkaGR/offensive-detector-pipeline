@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import platform
 import sys
@@ -9,8 +8,6 @@ import mlflow.pytorch
 import torch
 
 from src.config.settings import MLflowSettings, ModelSettings, TrainingSettings
-
-logger = logging.getLogger(__name__)
 
 
 class MLflowTracker:
@@ -28,9 +25,12 @@ class MLflowTracker:
         self._active = False
 
     def __enter__(self) -> "MLflowTracker":
-        self._setup_tracking()
-        self._start_run()
-        self._active = True
+        try:
+            self._setup_tracking()
+            self._start_run()
+            self._active = True
+        except Exception as exc:
+            self._active = False
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -48,16 +48,12 @@ class MLflowTracker:
         try:
             mlflow.set_tracking_uri(self._mlflow_cfg.tracking_uri)
             mlflow.set_experiment(self._mlflow_cfg.experiment_name)
-            logger.info(f"MLflow tracking URI: {self._mlflow_cfg.tracking_uri}")
-            logger.info(f"MLflow experiment name: {self._mlflow_cfg.experiment_name}")
         except Exception as exc:
-            logger.warning(f"MLflow setup failed: {exc}. Proceeding without tracking.")
             self._active = False
 
     def _start_run(self) -> None:
         run_name = self._mlflow_cfg.run_name or None
         self._run = mlflow.start_run(run_name=run_name)
-        logger.info(f"MLflow run started: {self._run.info.run_id}")
 
         # System tags
         mlflow.set_tags({
@@ -164,32 +160,6 @@ class MLflowTracker:
                 tmp_path = f.name
             mlflow.log_artifact(tmp_path, artifact_path="evaluation")
             os.unlink(tmp_path)
-
-        logger.info(f"MLflow: logged test metrics - "
-                    f"F1={metrics.get('test_f1_weighted'):.4f}, "
-                    f"AUC={metrics.get('test_roc_auc'):.4f}")
-
-    def log_model_artifact(self, model_path: str) -> None:
-        if not self._active or not self._mlflow_cfg.log_model:
-            return
-
-        if os.path.exists(model_path):
-            mlflow.log_artifact(model_path, artifact_path="model")
-
-    def log_tokenizer_artifact(self, tokenizer_dir: str) -> None:
-        if not self._active or not self._mlflow_cfg.log_model:
-            return
-
-        if os.path.isdir(tokenizer_dir):
-            mlflow.log_artifacts(tokenizer_dir, artifact_path="tokenizer")
-
-    def log_plots(self, plots_dir: str) -> None:
-        if not self._active or not self._mlflow_cfg.log_plots:
-            return
-
-        png_files = [file for file in os.listdir(plots_dir) if file.endswith(".png")]
-        for file in png_files:
-            mlflow.log_artifact(os.path.join(plots_dir, file), artifact_path="plots")
 
     def log_history(self, history: dir) -> None:
         if not self._active:

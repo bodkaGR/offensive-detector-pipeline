@@ -19,7 +19,12 @@ services:
       --host 0.0.0.0
       --port 5000
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
+      test: [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')",
+        ]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -41,10 +46,12 @@ services:
       - ./plots:/app/plots
       - ./reports:/app/reports
     environment:
-      MLFLOW_TRACKING_URI: http://localhost:5000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_EXPERIMENT_NAME: offensive-text-detection
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
+      HF_REPO_ID: ${HF_REPO_ID}
+      HF_TOKEN: ${HF_TOKEN}
     command: >
       python scripts/train.py
       --data_path data/labeled_data.csv
@@ -53,7 +60,6 @@ services:
 
 volumes:
   mlflow-data:
-  model-artifacts:
 
 networks:
   ml-net:

@@ -39,7 +39,6 @@ class TransformerEncoderBlock(nn.Module):
         x: torch.Tensor,
         key_padding_mask: torch.Tensor,
     ) -> torch.Tensor:
-        # Pre-LN + MHA + residual
         residual = x
 
         x = self.norm1(x)
@@ -51,7 +50,6 @@ class TransformerEncoderBlock(nn.Module):
         )
         x = residual + self.drop1(attn_out)
 
-        # Pre-LN + FFN + residual
         residual = x
         x = self.norm2(x)
         x = residual + self.ffn(x)

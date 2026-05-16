@@ -107,6 +107,19 @@ class MLflowSettings:
 
 
 @dataclass(frozen=True)
+class HuggingFaceSettings:
+    token: str = field(default_factory=lambda: os.getenv("HF_TOKEN", None))
+    repository_id: str = field(default_factory=lambda: os.getenv("HF_REPO_ID", None))
+    is_public: bool = True
+    repository_type: str = "model"
+    commit_message: str = "Upload trained MPNet + TransformerEncoder model"
+
+    @property
+    def is_configured(self):
+        return bool(self.repository_id) and bool(self.token)
+
+
+@dataclass(frozen=True)
 class InferenceSettings:
     classification_threshold: float = 0.5
 
@@ -119,4 +132,5 @@ class Settings:
     model: ModelSettings = field(default_factory=ModelSettings)
     training: TrainingSettings = field(default_factory=TrainingSettings)
     mlflow: MLflowSettings = field(default_factory=MLflowSettings)
+    huggingface: HuggingFaceSettings = field(default_factory=HuggingFaceSettings)
     inference: InferenceSettings = field(default_factory=InferenceSettings)
